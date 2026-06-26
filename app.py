@@ -3,47 +3,59 @@ import pdfplumber
 import pandas as pd
 import io
 
-st.title("PO Data Extractor")
-uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+st.set_page_config(page_title="PO Data Extractor", layout="wide")
+
+st.title("📄 PO Data Extractor")
+st.write("Upload your Purchase Order PDF to convert it into a structured Excel file.")
+
+uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 
 if uploaded_file is not None:
     all_items = []
     
     with pdfplumber.open(uploaded_file) as pdf:
+        # Loop through pages
         for page in pdf.pages:
-            # table_settings helps handle complex PDF tables
-            table = page.extract_table(table_settings={
-                "vertical_strategy": "lines", 
-                "horizontal_strategy": "text",
-                "join_tolerance": 5
-            })
+            # Extract tables - 'lattice' works best for structured POs
+            table = page.extract_table(table_settings={"strategy": "lines"})
             
             if table:
                 for row in table:
-                    # Check if the row looks like a line item (starts with a number)
-                    # We look for the structure: [Line #, Material, Desc, Qty, Price, Subtotal]
-                    # Adjust index based on visual inspection of your specific PDF
+                    # Filter for rows that contain data (Line # as the identifier)
+                    # Adjust 'row[0]' index if your specific PDF has different column spacing
                     if row[0] and str(row[0]).strip().isdigit():
                         all_items.append({
                             "Line #": row[0],
-                            "Part #": row[1] if len(row) > 1 else "",
+                            "PU": row[1] if len(row) > 1 else "",
                             "Description": row[2] if len(row) > 2 else "",
-                            "Qty": row[4] if len(row) > 4 else "",
-                            "Unit Price": row[6] if len(row) > 6 else "",
-                            "Subtotal": row[7] if len(row) > 7 else ""
+                            "QTY": row[3] if len(row) > 3 else "",
+                            "Unit Price": row[4] if len(row) > 4 else "",
+                            "Subtotal": row[5] if len(row) > 5 else ""
                         })
 
-    df = pd.DataFrame(all_items)
-    
-    if not df.empty:
-        st.write("Extracted Data Preview:")
-        st.dataframe(df)
+    if all_items:
+        df = pd.DataFrame(all_items)
         
-        # Download button
+        # Data Cleaning: remove 'PHP' and commas for clean numeric export
+        for col in ["Unit Price", "Subtotal"]:
+            df[col] = df[col].replace(r'[^0-9.]', '', regex=True)
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        st.success(f"Successfully extracted {len(df)} items!")
+        st.dataframe(df)
+
+        # Create Excel file in memory
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False)
+            df.to_excel(writer, index=False, sheet_name='PO Data')
         
-        st.download_button("Download Excel", output.getvalue(), "extracted_po.xlsx")
+        st.download_button(
+            label="⬇️ Download Excel File",
+            data=output.getvalue(),
+            file_name="extracted_po_data.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     else:
-        st.warning("No data found. The PDF table structure might be different than expected.")
+        st.error("Could not find tabular data in this PDF. Please verify the file format.")
+
+# Conceptual diagram showing how the data pipeline works:
