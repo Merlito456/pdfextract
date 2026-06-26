@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 st.title("📄 PDF Data Extractor")
-st.markdown("Extract line item data from PDF files")
+st.markdown("Extract line item data from PDF files - Support multiple uploads")
 
 def extract_data_from_pdf(pdf_file):
     """
@@ -35,7 +35,7 @@ def extract_data_from_pdf(pdf_file):
             return parse_pdf_text(all_text)
             
     except Exception as e:
-        st.error(f"Error extracting data: {str(e)}")
+        st.error(f"Error extracting data from {pdf_file.name}: {str(e)}")
         return []
 
 def parse_pdf_text(text):
@@ -283,123 +283,284 @@ def create_excel_with_style(df, filename):
         
         # Freeze the header row
         worksheet.freeze_panes = 'A2'
-        
-        # Add a title row above the data (optional)
-        # Uncomment if you want a title
-        # worksheet.insert_rows(1)
-        # title_cell = worksheet.cell(row=1, column=1)
-        # title_cell.value = f"Extracted Data from {filename}"
-        # title_cell.font = Font(name='Calibri', size=14, bold=True)
-        # worksheet.merge_cells(f'A1:F1')
     
     return output.getvalue()
 
-def create_download_link(df, filename):
+def create_combined_excel(all_dfs, filenames):
     """
-    Create download link for Excel file with filename matching uploaded file
+    Create combined Excel file with multiple sheets
     """
-    # Remove .pdf extension and add .xlsx
-    base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
-    excel_filename = f"{base_name}_extracted.xlsx"
+    output = BytesIO()
     
-    excel_data = create_excel_with_style(df, base_name)
-    
-    b64 = base64.b64encode(excel_data).decode()
-    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{excel_filename}">📥 Download Excel File</a>'
-    return href
-
-# Main app UI
-def main():
-    uploaded_file = st.file_uploader("Upload PDF file", type=['pdf'])
-    
-    if uploaded_file is not None:
-        st.success("✅ File uploaded successfully!")
-        
-        with st.spinner("Extracting data from PDF..."):
-            extracted_data = extract_data_from_pdf(uploaded_file)
-        
-        if extracted_data:
-            # Convert to DataFrame
-            df = pd.DataFrame(extracted_data)
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for idx, (df, filename) in enumerate(zip(all_dfs, filenames)):
+            # Get sheet name (truncate if too long)
+            sheet_name = filename.rsplit('.', 1)[0][:31] if '.' in filename else filename[:31]
+            if len(sheet_name) > 31:
+                sheet_name = sheet_name[:28] + '...'
             
-            # Clean up
+            # Make sheet name unique if duplicate
+            if sheet_name in writer.sheets:
+                sheet_name = f"{sheet_name[:28]}_{idx+1}"
+            
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+            
+            # Get the worksheet
+            worksheet = writer.sheets[sheet_name]
+            
+            # Apply styling
+            header_font = Font(name='Calibri', size=12, bold=True, color='FFFFFF')
+            header_fill = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+            header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            
+            cell_font = Font(name='Calibri', size=11)
+            cell_alignment = Alignment(horizontal='left', vertical='center')
+            number_alignment = Alignment(horizontal='right', vertical='center')
+            
+            thin_border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+            
+            # Apply header styles
+            for col in range(1, len(df.columns) + 1):
+                cell = worksheet.cell(row=1, column=col)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+                cell.border = thin_border
+            
+            # Apply data styles
+            for row in range(2, len(df) + 2):
+                for col in range(1, len(df.columns) + 1):
+                    cell = worksheet.cell(row=row, column=col)
+                    cell.font = cell_font
+                    cell.border = thin_border
+                    
+                    if col in [5, 6]:
+                        cell.alignment = number_alignment
+                        if cell.value and isinstance(cell.value, (int, float)):
+                            cell.number_format = '#,##0.00'
+                    else:
+                        cell.alignment = cell_alignment
+            
+            # Set column widths
+            column_widths = {'A': 12, 'B': 15, 'C': 50, 'D': 15, 'E': 18, 'F': 18}
+            for col, width in column_widths.items():
+                worksheet.column_dimensions[col].width = width
+            
+            worksheet.freeze_panes = 'A2'
+    
+    return output.getvalue()
+
+def process_multiple_pdfs(uploaded_files, process_mode):
+    """
+    Process multiple PDFs based on selected mode
+    """
+    all_data = []
+    file_names = []
+    total_rows = 0
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for idx, file in enumerate(uploaded_files):
+        status_text.text(f"Processing: {file.name}...")
+        data = extract_data_from_pdf(file)
+        
+        if data:
+            df = pd.DataFrame(data)
             df = df.replace('', pd.NA).dropna(how='all')
             df = df.fillna('')
-            
-            # Remove any rows with headers
             df = df[~df['Line #'].astype(str).str.contains('Line', case=False, na=False)]
             
-            # Reorder columns
             desired_columns = ['Line #', 'PU', 'Description', 'QTY', 'Unit Price', 'Subtotal']
             existing_columns = [col for col in desired_columns if col in df.columns]
             if existing_columns:
                 df = df[existing_columns]
             
-            # Display results
-            st.subheader("📊 Extracted Data")
-            st.dataframe(df, use_container_width=True)
+            if process_mode == "Combine into one":
+                all_data.append(df)
+            else:  # Process individually
+                all_data.append(df)
             
-            # Display statistics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Items", len(df))
-            with col2:
-                if 'Subtotal' in df.columns and not df['Subtotal'].empty:
-                    subtotal_clean = df['Subtotal'].astype(str).str.replace(',', '').str.replace(' PHP', '').str.replace('₱', '').str.replace(' ', '')
-                    subtotal_clean = subtotal_clean.replace('', '0')
-                    try:
-                        subtotal_sum = pd.to_numeric(subtotal_clean, errors='coerce').sum()
-                        if not pd.isna(subtotal_sum):
-                            st.metric("Total Value", f"₱{subtotal_sum:,.2f}")
-                        else:
-                            st.metric("Total Value", "N/A")
-                    except:
-                        st.metric("Total Value", "N/A")
-            with col3:
-                st.metric("Fields Extracted", len(df.columns))
+            file_names.append(file.name)
+            total_rows += len(df)
+        
+        progress_bar.progress((idx + 1) / len(uploaded_files))
+    
+    status_text.text(f"✅ Processed {len(uploaded_files)} files, extracted {total_rows} rows")
+    progress_bar.empty()
+    
+    return all_data, file_names
+
+# Main app UI
+def main():
+    st.subheader("📤 Upload PDF Files")
+    
+    # Allow multiple file uploads
+    uploaded_files = st.file_uploader(
+        "Choose PDF files",
+        type=['pdf'],
+        accept_multiple_files=True,
+        help="Upload one or multiple PDF files"
+    )
+    
+    if uploaded_files:
+        st.success(f"✅ {len(uploaded_files)} file(s) uploaded successfully!")
+        
+        # Display uploaded files
+        with st.expander("📋 Uploaded Files"):
+            for file in uploaded_files:
+                st.write(f"📄 {file.name} ({file.size / 1024:.1f} KB)")
+        
+        # Processing options
+        st.subheader("⚙️ Processing Options")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            process_mode = st.radio(
+                "Processing Mode",
+                ["Combine into one", "Process individually"],
+                help="Combine all data into one file or keep separate"
+            )
+        
+        with col2:
+            include_source = st.checkbox(
+                "Include source filename in data",
+                value=True,
+                help="Add a column showing which file each row came from"
+            )
+        
+        # Process button
+        if st.button("🚀 Extract Data", type="primary"):
+            all_data, file_names = process_multiple_pdfs(uploaded_files, process_mode)
             
-            # Download options
-            st.subheader("📥 Download Extracted Data")
-            
-            # Get original filename
-            original_filename = uploaded_file.name
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                # Excel download with styling and matching filename
-                st.markdown(create_download_link(df, original_filename), unsafe_allow_html=True)
-            
-            with col2:
-                # CSV download with matching filename
-                base_name = original_filename.rsplit('.', 1)[0] if '.' in original_filename else original_filename
-                csv_filename = f"{base_name}_extracted.csv"
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download CSV File",
-                    data=csv,
-                    file_name=csv_filename,
-                    mime="text/csv"
-                )
-            
-            # Show raw extracted data
-            with st.expander("🔍 View Raw Extracted Data"):
-                st.json(extracted_data)
+            if all_data:
+                st.subheader("📊 Extracted Data")
                 
-        else:
-            st.warning("No data could be extracted from the PDF.")
-            
-            # Show raw text for debugging
-            with st.expander("📄 Show raw PDF text"):
-                try:
-                    with pdfplumber.open(uploaded_file) as pdf:
-                        text = ""
-                        for page in pdf.pages:
-                            text += page.extract_text() or ""
-                        st.text(text[:3000])
-                except Exception as e:
-                    st.error(f"Could not display PDF text: {str(e)}")
+                if process_mode == "Combine into one":
+                    # Combine all dataframes
+                    combined_df = pd.concat(all_data, ignore_index=True)
+                    
+                    if include_source:
+                        # Add source column
+                        source_col = []
+                        for df, filename in zip(all_data, file_names):
+                            source_col.extend([filename] * len(df))
+                        combined_df.insert(0, 'Source File', source_col)
+                    
+                    st.dataframe(combined_df, use_container_width=True)
+                    
+                    # Display statistics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Items", len(combined_df))
+                    with col2:
+                        if 'Subtotal' in combined_df.columns and not combined_df['Subtotal'].empty:
+                            subtotal_clean = combined_df['Subtotal'].astype(str).str.replace(',', '').str.replace(' PHP', '').str.replace('₱', '').str.replace(' ', '')
+                            subtotal_clean = subtotal_clean.replace('', '0')
+                            try:
+                                subtotal_sum = pd.to_numeric(subtotal_clean, errors='coerce').sum()
+                                if not pd.isna(subtotal_sum):
+                                    st.metric("Total Value", f"₱{subtotal_sum:,.2f}")
+                                else:
+                                    st.metric("Total Value", "N/A")
+                            except:
+                                st.metric("Total Value", "N/A")
+                    with col3:
+                        st.metric("Files Processed", len(uploaded_files))
+                    
+                    # Download combined file
+                    st.subheader("📥 Download Extracted Data")
+                    
+                    # Create combined filename
+                    base_name = "combined_extracted"
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        excel_data = create_excel_with_style(combined_df, base_name)
+                        b64 = base64.b64encode(excel_data).decode()
+                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{base_name}.xlsx">📥 Download Combined Excel File</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                    
+                    with col2:
+                        csv = combined_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Download Combined CSV File",
+                            data=csv,
+                            file_name=f"{base_name}.csv",
+                            mime="text/csv"
+                        )
+                    
+                else:  # Process individually
+                    # Show each file's data
+                    for idx, (df, filename) in enumerate(zip(all_data, file_names)):
+                        with st.expander(f"📄 {filename} ({len(df)} items)"):
+                            st.dataframe(df, use_container_width=True)
+                    
+                    # Download individual files or combined
+                    st.subheader("📥 Download Extracted Data")
+                    
+                    download_option = st.radio(
+                        "Download options:",
+                        ["Download individual files", "Download all as one combined file"]
+                    )
+                    
+                    if download_option == "Download individual files":
+                        # Create download buttons for each file
+                        for idx, (df, filename) in enumerate(zip(all_data, file_names)):
+                            base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                excel_data = create_excel_with_style(df, base_name)
+                                b64 = base64.b64encode(excel_data).decode()
+                                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{base_name}_extracted.xlsx">📥 Download {base_name}.xlsx</a>'
+                                st.markdown(href, unsafe_allow_html=True)
+                            
+                            with col2:
+                                csv = df.to_csv(index=False).encode('utf-8')
+                                st.download_button(
+                                    label=f"📥 Download {base_name}.csv",
+                                    data=csv,
+                                    file_name=f"{base_name}_extracted.csv",
+                                    mime="text/csv",
+                                    key=f"csv_{idx}"
+                                )
+                    else:
+                        # Combine all into one file with multiple sheets
+                        combined_excel = create_combined_excel(all_data, file_names)
+                        b64 = base64.b64encode(combined_excel).decode()
+                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="combined_extracted.xlsx">📥 Download Combined Excel File (Multiple Sheets)</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                        
+                        # Also provide combined CSV
+                        combined_df = pd.concat(all_data, ignore_index=True)
+                        if include_source:
+                            source_col = []
+                            for df, filename in zip(all_data, file_names):
+                                source_col.extend([filename] * len(df))
+                            combined_df.insert(0, 'Source File', source_col)
+                        
+                        csv = combined_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Download Combined CSV File",
+                            data=csv,
+                            file_name="combined_extracted.csv",
+                            mime="text/csv"
+                        )
+                
+                # Show raw extracted data
+                with st.expander("🔍 View Raw Extracted Data"):
+                    st.json(all_data)
+                
+            else:
+                st.warning("No data could be extracted from any of the PDF files.")
     else:
-        st.info("👈 Please upload a PDF file to extract data")
+        st.info("👈 Please upload one or more PDF files to extract data")
 
 if __name__ == "__main__":
     main()
