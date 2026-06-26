@@ -1,33 +1,33 @@
+import streamlit as st
 import pdfplumber
 import pandas as pd
 
-def extract_po_data(pdf_path):
+# Define the function to take the file object, not a string path
+def extract_po_data(file_obj):
     extracted_items = []
     
-    with pdfplumber.open(pdf_path) as pdf:
+    # Use the file object directly
+    with pdfplumber.open(file_obj) as pdf:
         for page in pdf.pages:
-            # We use extract_table with default settings which is 
-            # generally robust for this document type
             table = page.extract_table()
-            
             if table:
                 for row in table:
-                    # Filter for rows that start with a number (Line #)
-                    # We convert to string and check if it represents an integer
+                    # Robust check: Ensure row[0] exists and is a digit
                     if row[0] and str(row[0]).strip().isdigit():
                         item = {
                             "Line #": row[0],
-                            "Part #/Description": row[2], # The description often falls here
-                            "Qty (Unit)": row[5],
-                            "Unit Price": row[7],
-                            "Subtotal": row[8]
+                            "Part #/Description": row[2] if len(row) > 2 else "",
+                            "Qty (Unit)": row[5] if len(row) > 5 else "",
+                            "Unit Price": row[7] if len(row) > 7 else "",
+                            "Subtotal": row[8] if len(row) > 8 else ""
                         }
                         extracted_items.append(item)
-    
     return pd.DataFrame(extracted_items)
 
-# Execute and view
-df = extract_po_data("4540526620 THE LINDGREEN .pdf")
-print(df)
-# To save to Excel:
-# df.to_excel("extracted_po.xlsx", index=False)
+# Streamlit Interface
+uploaded_file = st.file_uploader("Upload your PO PDF", type="pdf")
+
+if uploaded_file is not None:
+    # PASS THE UPLOADED FILE OBJECT HERE
+    df = extract_po_data(uploaded_file)
+    st.dataframe(df)
