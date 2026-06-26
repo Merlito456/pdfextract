@@ -55,7 +55,6 @@ def parse_pdf_text(text):
             continue
         
         # Look for data rows starting with line number
-        # Pattern: Line number, then "Not Available" or "Material", then QTY (with optional comma), then date, then prices
         match = re.search(r'^(\d+)\s+(?:Not\s+Available|Material)\s+([\d,]+(?:\.\d+)?\s*\([A-Z]+\))\s+\d+\s+[A-Za-z]+\s+\d+\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+(?:\s+([\d,]+\.\d+)\s+[A-Z]+)?', line, re.IGNORECASE)
         
         if match:
@@ -75,23 +74,40 @@ def parse_pdf_text(text):
             if i + 1 < len(lines):
                 next_line = lines[i + 1].strip()
                 
-                # Look for product code pattern (like 900020-Cable Entrance Facilities_OSP Lab)
-                pu_match = re.search(r'^([A-Z0-9\-_]+)[,\s]+([A-Za-z0-9\s\._\-]+)', next_line)
+                # Try to extract PU and Description
+                # The pattern is: product code (digits only or digits with letters), then description
+                # Examples: 
+                # "601035,ML_Duct Single Mode FOC,72 Fibers" -> PU: 601035, Desc: ML_Duct Single Mode FOC,72 Fibers
+                # "112010-Hard Earth, 5/8"x6ft rod (OSP)_ML" -> PU: 112010, Desc: Hard Earth, 5/8"x6ft rod (OSP)_ML
+                # "111010-Head Guy, 6 M(OSP)_ML" -> PU: 111010, Desc: Head Guy, 6 M(OSP)_ML
+                
+                # First try: look for pattern where PU is digits only, followed by optional hyphen or comma
+                pu_match = re.search(r'^(\d+)[,\-]?\s*(.+)$', next_line)
                 if pu_match:
                     pu = pu_match.group(1).strip()
                     description = pu_match.group(2).strip()
                 else:
-                    # Try alternative pattern
-                    pu_match2 = re.search(r'^([A-Z0-9\-_]+)', next_line)
+                    # Second try: look for alphanumeric with hyphen (like 900020-Cable)
+                    pu_match2 = re.search(r'^([A-Z0-9\-_]+)[,\s]+(.+)$', next_line)
                     if pu_match2:
                         pu = pu_match2.group(1).strip()
-                        # Rest is description
-                        description = next_line.replace(pu, '').strip()
-                        if description.startswith(','):
-                            description = description[1:].strip()
+                        description = pu_match2.group(2).strip()
                     else:
-                        # If no product code found, the whole line might be description
-                        if not re.search(r'[\d,]', next_line):
+                        # Third try: just get the first word as PU if it looks like a product code
+                        pu_match3 = re.search(r'^([A-Z0-9\-_]+)', next_line)
+                        if pu_match3:
+                            potential_pu = pu_match3.group(1).strip()
+                            # Check if it's a valid product code (digits or digits with letters)
+                            if re.match(r'^\d+$', potential_pu) or re.match(r'^\d+[A-Z\-_]', potential_pu):
+                                pu = potential_pu
+                                description = next_line.replace(pu, '').strip()
+                                if description.startswith(','):
+                                    description = description[1:].strip()
+                                if description.startswith('-'):
+                                    description = description[1:].strip()
+                            else:
+                                description = next_line
+                        else:
                             description = next_line
             
             # If we still don't have PU, try to extract from the line
@@ -102,7 +118,7 @@ def parse_pdf_text(text):
             
             # Clean up description
             if description:
-                description = re.sub(r'^[,:\s]+', '', description)
+                description = re.sub(r'^[,:\-\s]+', '', description)
                 description = re.sub(r'\s+', ' ', description).strip()
             
             # Add the row
@@ -176,18 +192,29 @@ def parse_alternative(text):
             if i + 1 < len(lines):
                 next_line = lines[i + 1].strip()
                 if next_line and not next_line.startswith('STATUS') and 'Tax' not in next_line and 'Unconfirmed' not in next_line:
-                    # Try to extract PU
-                    pu_match = re.search(r'^([A-Z0-9\-_]+)', next_line)
+                    # Try to extract PU (digits only first, then digits with letters)
+                    # Pattern: digits only (like 601035) or digits with letters after (like 112010-Hard)
+                    pu_match = re.search(r'^(\d+)[,\-]?\s*(.+)$', next_line)
                     if pu_match:
-                        pu = pu_match.group(1)
+                        pu = pu_match.group(1).strip()
                         current_row['PU'] = pu
-                        # Rest is description
-                        desc = next_line.replace(pu, '').strip()
-                        if desc.startswith(','):
-                            desc = desc[1:].strip()
-                        current_row['Description'] = desc
+                        description = pu_match.group(2).strip()
+                        if description.startswith(','):
+                            description = description[1:].strip()
+                        if description.startswith('-'):
+                            description = description[1:].strip()
+                        current_row['Description'] = description
                     else:
-                        current_row['Description'] = next_line
+                        # Try alphanumeric pattern
+                        pu_match2 = re.search(r'^([A-Z0-9\-_]+)[,\s]+(.+)$', next_line)
+                        if pu_match2:
+                            pu = pu_match2.group(1).strip()
+                            current_row['PU'] = pu
+                            description = pu_match2.group(2).strip()
+                            current_row['Description'] = description
+                        else:
+                            # Just take the whole line as description
+                            current_row['Description'] = next_line
                     i += 1
         
         i += 1
