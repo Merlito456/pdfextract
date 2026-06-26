@@ -51,26 +51,21 @@ def parse_pdf_text(text):
         
         # Look for line items - they start with "Line #No. Schedule Lines"
         if 'Line #No. Schedule Lines' in line or 'Line #No. Schedule LinesPart # / Description' in line.replace(' ', ''):
-            # This is a header, skip to next line
             i += 1
             continue
         
         # Look for data rows starting with line number
-        # Pattern: Line number, then "Not Available", then QTY, then date, then prices
-        match = re.search(r'^(\d+)\s+(Not\s+Available|Material)\s+(\d+[\(\)\s\w]+?)\s+(\d+\s+[A-Za-z]+\s+\d+)\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+(?:\s+([\d,]+\.\d+)\s+[A-Z]+)?', line, re.IGNORECASE)
+        # Pattern: Line number, then "Not Available" or "Material", then QTY, then date, then prices
+        match = re.search(r'^(\d+)\s+(?:Not\s+Available|Material)\s+(\d+(?:\.\d+)?\s*\([A-Z]+\))\s+\d+\s+[A-Za-z]+\s+\d+\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+(?:\s+([\d,]+\.\d+)\s+[A-Z]+)?', line, re.IGNORECASE)
         
         if match:
             groups = match.groups()
             
-            # Extract line number
+            # Extract data
             line_num = groups[0].strip()
-            
-            # Extract QTY
-            qty = groups[2].strip() if len(groups) > 2 else ""
-            
-            # Extract Unit Price and Subtotal
-            unit_price = groups[4].strip() if len(groups) > 4 else ""
-            subtotal = groups[5].strip() if len(groups) > 5 else ""
+            qty = groups[1].strip() if len(groups) > 1 else ""
+            unit_price = groups[2].strip() if len(groups) > 2 else ""
+            subtotal = groups[3].strip() if len(groups) > 3 else ""
             
             # Look for product code and description
             pu = ""
@@ -148,7 +143,7 @@ def parse_alternative(text):
         line = lines[i].strip()
         
         # Look for line number
-        line_num_match = re.search(r'^(\d+)\s+(Not\s+Available|Material)', line)
+        line_num_match = re.search(r'^(\d+)\s+(?:Not\s+Available|Material)', line)
         if line_num_match:
             # If we have a previous row, save it
             if current_row:
@@ -164,8 +159,8 @@ def parse_alternative(text):
                 'Subtotal': ''
             }
             
-            # Extract QTY
-            qty_match = re.search(r'(\d+[\(\)\s\w]+?)\s+\d+\s+[A-Za-z]+', line)
+            # Extract QTY - look for pattern like "3 (EA)" or "100 (M)"
+            qty_match = re.search(r'(\d+(?:\.\d+)?\s*\([A-Z]+\))', line)
             if qty_match:
                 current_row['QTY'] = qty_match.group(1).strip()
             
@@ -180,7 +175,7 @@ def parse_alternative(text):
             # Check next line for PU and Description
             if i + 1 < len(lines):
                 next_line = lines[i + 1].strip()
-                if next_line and not next_line.startswith('STATUS') and not 'Tax' in next_line:
+                if next_line and not next_line.startswith('STATUS') and 'Tax' not in next_line and 'Unconfirmed' not in next_line:
                     # Try to extract PU
                     pu_match = re.search(r'^([A-Z0-9\-_]+)', next_line)
                     if pu_match:
