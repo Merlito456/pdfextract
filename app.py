@@ -55,8 +55,8 @@ def parse_pdf_text(text):
             continue
         
         # Look for data rows starting with line number
-        # Pattern: Line number, then "Not Available" or "Material", then QTY, then date, then prices
-        match = re.search(r'^(\d+)\s+(?:Not\s+Available|Material)\s+(\d+(?:\.\d+)?\s*\([A-Z]+\))\s+\d+\s+[A-Za-z]+\s+\d+\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+(?:\s+([\d,]+\.\d+)\s+[A-Z]+)?', line, re.IGNORECASE)
+        # Pattern: Line number, then "Not Available" or "Material", then QTY (with optional comma), then date, then prices
+        match = re.search(r'^(\d+)\s+(?:Not\s+Available|Material)\s+([\d,]+(?:\.\d+)?\s*\([A-Z]+\))\s+\d+\s+[A-Za-z]+\s+\d+\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+(?:\s+([\d,]+\.\d+)\s+[A-Z]+)?', line, re.IGNORECASE)
         
         if match:
             groups = match.groups()
@@ -159,8 +159,8 @@ def parse_alternative(text):
                 'Subtotal': ''
             }
             
-            # Extract QTY - look for pattern like "3 (EA)" or "100 (M)"
-            qty_match = re.search(r'(\d+(?:\.\d+)?\s*\([A-Z]+\))', line)
+            # Extract QTY - look for pattern like "3 (EA)" or "100 (M)" or "2,000 (M)"
+            qty_match = re.search(r'([\d,]+(?:\.\d+)?\s*\([A-Z]+\))', line)
             if qty_match:
                 current_row['QTY'] = qty_match.group(1).strip()
             
