@@ -412,25 +412,6 @@ def main():
             3. View the extracted data in a table
             4. Download the data as Excel or CSV
             
-            ### Sample Data Format:
-            The app can extract data from various PDF formats including:
-            - Tabular data with headers
-            - Structured text with line items
-            - Invoices and purchase orders
-            
-            ### Sample Input:
-Line # No. Schedule Lines Part # / Description Type Return Qty (Unit) Need By Unit Price Subtotal Tax
-13 Not Available 1(EA) 30 May 2025 21,363.27 PHP 21,363.27 PHP 2,563.59 PHP
-900020-Cable Entrance Facilities_OSP Lab
-
-### Extracted Output:
-- Line #: 13
-- PU: 900020
-- Description: Cable Entrance Facilities_OSP Lab
-- QTY: 1(EA)
-- Unit Price: 21,363.27 PHP
-- Subtotal: 21,363.27 PHP
-""")
-
+           
 if __name__ == "__main__":
 main()
