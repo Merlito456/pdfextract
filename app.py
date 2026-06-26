@@ -3,46 +3,44 @@ import pdfplumber
 import pandas as pd
 import io
 
-st.set_page_config(page_title="Advanced PO Extractor", layout="wide")
-st.title("🚀 Advanced PO Data Extractor")
-uploaded_file = st.file_uploader("Upload your SAP PO PDF", type="pdf")
+st.set_page_config(page_title="PO Data Extractor", layout="wide")
+st.title("🎯 Precision PO Data Extractor")
 
-def parse_advanced(pdf_file):
-    items = []
-    with pdfplumber.open(pdf_file) as pdf:
-        for page in pdf.pages:
-            # We extract words with their coordinates to understand the layout
-            words = page.extract_words(use_text_flow=True)
-            text = page.extract_text()
-            
-            # Logic: Split the page by lines and look for rows starting with a Line Number
-            lines = text.split('\n')
-            for line in lines:
-                # Regex looks for lines starting with a number followed by space
-                # This catches the typical "1  Part#  Desc  Qty  Price  Subtotal" format
-                if line.strip() and line.strip()[0].isdigit():
-                    parts = line.split()
-                    if len(parts) >= 6:
-                        items.append({
-                            "Line #": parts[0],
-                            "Description": " ".join(parts[1:3]), # Basic grouping
-                            "Qty": parts[3],
-                            "Unit Price": parts[-2],
-                            "Subtotal": parts[-1]
-                        })
-    return pd.DataFrame(items)
+uploaded_file = st.file_uploader("Upload your Purchase Order PDF", type="pdf")
+
+def clean_value(val):
+    """Cleans currency strings and removes unwanted characters."""
+    if val is None: return ""
+    return str(val).replace("PHP", "").replace(",", "").strip()
 
 if uploaded_file is not None:
-    try:
-        df = parse_advanced(uploaded_file)
-        if not df.empty:
-            st.dataframe(df)
+    all_items = []
+    
+    with pdfplumber.open(uploaded_file) as pdf:
+        for page in pdf.pages:
+            # We look for the table using line detection
+            # If the PDF is a complex Ariba layout, we use the 'lines' strategy
+            tables = page.extract_tables(table_settings={"vertical_strategy": "lines", "horizontal_strategy": "lines"})
             
-            # Excel export
-            output = io.BytesIO()
-            df.to_excel(output, index=False)
-            st.download_button("Download Results", output.getvalue(), "extracted.xlsx")
-        else:
-            st.warning("No line items identified. The text layout might be too fragmented.")
-    except Exception as e:
-        st.error(f"Advanced Parsing Error: {e}")
+            for table in tables:
+                for row in table:
+                    # Filter rows: A valid line item starts with a digit 1-23
+                    if row[0] and str(row[0]).strip().isdigit():
+                        all_items.append({
+                            "Line #": row[0],
+                            "Description": row[2],
+                            "Qty": row[4],
+                            "Unit Price": row[6],
+                            "Subtotal": row[7]
+                        })
+
+    if all_items:
+        df = pd.DataFrame(all_items)
+        st.dataframe(df)
+        
+        # Create Excel
+        output = io.BytesIO()
+        df.to_excel(output, index=False)
+        st.download_button("Download Corrected Excel", output.getvalue(), "PO_Corrected_Data.xlsx")
+    else:
+        st.error("No structured table detected. The PDF might be an image-based scan.")
