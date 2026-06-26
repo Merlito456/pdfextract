@@ -9,29 +9,32 @@ def extract_po_data_robust(uploaded_file):
     
     with pdfplumber.open(uploaded_file) as pdf:
         for page in pdf.pages:
-            # Extract text with layout analysis
-            text_blocks = page.extract_words(x_tolerance=2, y_tolerance=2)
+            # Extract words and group them by their vertical position (Y-coordinate)
+            words = page.extract_words(x_tolerance=2, y_tolerance=2)
             
-            # Grouping by Y-coordinate to reconstruct lines
-            rows = {}
-            for block in text_blocks:
-                y = round(block['top'])
-                if y not in rows: rows[y] = []
-                rows[y].append(block['text'])
+            # Dictionary to group words into lines based on Y position
+            lines = {}
+            for word in words:
+                y = round(word['top'])
+                if y not in lines:
+                    lines[y] = []
+                lines[y].append(word['text'])
             
-            # Processing rows
-            for y in sorted(rows.keys()):
-                line_text = " ".join(rows[y])
+            # Sort by Y position to read top-to-bottom
+            sorted_y = sorted(lines.keys())
+            
+            # Iterate through reconstructed lines to find the pattern
+            for i in range(len(sorted_y)):
+                line_text = " ".join(lines[sorted_y[i]])
                 
-                # Look for lines starting with a number (Line #)
-                # Matches format: 1  Not Available  [Part-Desc]  [Qty]  [Price]  [Subtotal]
-                match = re.match(r'^(\d+)\s+Not Available\s+(.*?)\s+(\d+[\d\.]*\s+\(?\w+\)?)\s+([\d\.,]+\s+PHP)\s+([\d\.,]+\s+PHP)', line_text)
+                # Regex matches lines starting with the Line #
+                # Pattern: Line# | Not Available | [Description] | [Qty] | [Price] | [Subtotal]
+                match = re.match(r'^(\d+)\s+Not Available\s+(.*?)\s+(\d+[\d,.]*\s+\(?\w+\)?)\s+([\d,.]+\s+PHP)\s+([\d,.]+\s+PHP)', line_text)
                 
                 if match:
                     line_num, desc_part, qty, price, subtotal = match.groups()
                     
-                    # Splitting the Part# from Description
-                    # Looking for the pattern: 610035,ML, Aerial OR 900020-Cable...
+                    # Split Part# from Description using common delimiters (comma or hyphen)
                     parts = re.split(r'[,|-]', desc_part, maxsplit=1)
                     part_no = parts[0].strip()
                     description = parts[1].strip() if len(parts) > 1 else desc_part
@@ -47,12 +50,18 @@ def extract_po_data_robust(uploaded_file):
                     
     return pd.DataFrame(extracted_data)
 
-# Streamlit interface
-uploaded_file = st.file_uploader("Upload your PO PDF", type="pdf")
-if uploaded_file:
+# Streamlit Interface
+st.title("🚀 Precision PO Data Extractor")
+uploaded_file = st.file_uploader("Upload your Purchase Order PDF", type="pdf")
+
+if uploaded_file is not None:
     df = extract_po_data_robust(uploaded_file)
     if not df.empty:
         st.dataframe(df)
-        # Download logic...
+        
+        # Excel Export
+        output = io.BytesIO()
+        df.to_excel(output, index=False)
+        st.download_button("⬇️ Download Excel", output.getvalue(), "extracted_po.xlsx")
     else:
-        st.error("Still no items found. The layout is highly fragmented.")
+        st.error("Could not reconstruct the table. Please check if the PDF contains selectable text.")
