@@ -2,44 +2,47 @@ import streamlit as st
 import pdfplumber
 import pandas as pd
 import io
-import re
 
-st.set_page_config(page_title="PO Data Extractor", layout="wide")
-st.title("📄 Robust PO Data Extractor")
-uploaded_file = st.file_uploader("Upload PDF", type="pdf")
+st.set_page_config(page_title="Advanced PO Extractor", layout="wide")
+st.title("🚀 Advanced PO Data Extractor")
+uploaded_file = st.file_uploader("Upload your SAP PO PDF", type="pdf")
+
+def parse_advanced(pdf_file):
+    items = []
+    with pdfplumber.open(pdf_file) as pdf:
+        for page in pdf.pages:
+            # We extract words with their coordinates to understand the layout
+            words = page.extract_words(use_text_flow=True)
+            text = page.extract_text()
+            
+            # Logic: Split the page by lines and look for rows starting with a Line Number
+            lines = text.split('\n')
+            for line in lines:
+                # Regex looks for lines starting with a number followed by space
+                # This catches the typical "1  Part#  Desc  Qty  Price  Subtotal" format
+                if line.strip() and line.strip()[0].isdigit():
+                    parts = line.split()
+                    if len(parts) >= 6:
+                        items.append({
+                            "Line #": parts[0],
+                            "Description": " ".join(parts[1:3]), # Basic grouping
+                            "Qty": parts[3],
+                            "Unit Price": parts[-2],
+                            "Subtotal": parts[-1]
+                        })
+    return pd.DataFrame(items)
 
 if uploaded_file is not None:
-    all_items = []
-    
-    with pdfplumber.open(uploaded_file) as pdf:
-        full_text = ""
-        for page in pdf.pages:
-            full_text += page.extract_text() + "\n"
+    try:
+        df = parse_advanced(uploaded_file)
+        if not df.empty:
+            st.dataframe(df)
             
-    # Use Regex to find the pattern: Line Number + Description + Qty + Price + Subtotal
-    # This pattern looks for lines starting with 1 to 23
-    for i in range(1, 24):
-        # Pattern looks for the Line #, followed by various data, then PHP amounts
-        pattern = rf"{i}\s+(.*?)\s+(\d+[\d,]*\s+\(\w+\))\s+([\d,]+\.\d+\s+PHP)\s+([\d,]+\.\d+\s+PHP)"
-        match = re.search(pattern, full_text)
-        
-        if match:
-            all_items.append({
-                "Line #": i,
-                "Description": match.group(1).strip(),
-                "Qty": match.group(2).strip(),
-                "Unit Price": match.group(3).strip(),
-                "Subtotal": match.group(4).strip()
-            })
-
-    if all_items:
-        df = pd.DataFrame(all_items)
-        st.dataframe(df)
-
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False)
-        
-        st.download_button("⬇️ Download Excel", output.getvalue(), "extracted_po.xlsx")
-    else:
-        st.error("Could not parse the PDF structure. Please ensure it is the standard 'The Lindgreen' PO format.")
+            # Excel export
+            output = io.BytesIO()
+            df.to_excel(output, index=False)
+            st.download_button("Download Results", output.getvalue(), "extracted.xlsx")
+        else:
+            st.warning("No line items identified. The text layout might be too fragmented.")
+    except Exception as e:
+        st.error(f"Advanced Parsing Error: {e}")
