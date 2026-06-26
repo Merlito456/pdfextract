@@ -4,40 +4,46 @@ import pandas as pd
 import io
 
 st.title("PO Data Extractor")
-st.write("Upload a PDF Purchase Order to extract line items.")
-
 uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 
 if uploaded_file is not None:
-    # Read the file
+    all_items = []
+    
     with pdfplumber.open(uploaded_file) as pdf:
-        all_items = []
         for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
+            # table_settings helps handle complex PDF tables
+            table = page.extract_table(table_settings={
+                "vertical_strategy": "lines", 
+                "horizontal_strategy": "text",
+                "join_tolerance": 5
+            })
+            
+            if table:
                 for row in table:
-                    # Adjust column indexing based on your specific PDF structure
-                    if row[0] and str(row[0]).isdigit():
+                    # Check if the row looks like a line item (starts with a number)
+                    # We look for the structure: [Line #, Material, Desc, Qty, Price, Subtotal]
+                    # Adjust index based on visual inspection of your specific PDF
+                    if row[0] and str(row[0]).strip().isdigit():
                         all_items.append({
                             "Line #": row[0],
-                            "PU": row[2],
-                            "Description": row[3],
-                            "QTY": row[5],
-                            "Unit Price": row[7],
-                            "Subtotal": row[8]
+                            "Part #": row[1] if len(row) > 1 else "",
+                            "Description": row[2] if len(row) > 2 else "",
+                            "Qty": row[4] if len(row) > 4 else "",
+                            "Unit Price": row[6] if len(row) > 6 else "",
+                            "Subtotal": row[7] if len(row) > 7 else ""
                         })
 
     df = pd.DataFrame(all_items)
-    st.write("Extracted Data:", df)
-
-    # Create Excel file in memory
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False)
     
-    st.download_button(
-        label="Download Excel File",
-        data=output.getvalue(),
-        file_name="extracted_po.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    if not df.empty:
+        st.write("Extracted Data Preview:")
+        st.dataframe(df)
+        
+        # Download button
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False)
+        
+        st.download_button("Download Excel", output.getvalue(), "extracted_po.xlsx")
+    else:
+        st.warning("No data found. The PDF table structure might be different than expected.")
