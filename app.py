@@ -4,6 +4,9 @@ import pdfplumber
 import re
 from io import BytesIO
 import base64
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 st.set_page_config(
     page_title="PDF Data Extractor",
@@ -75,29 +78,19 @@ def parse_pdf_text(text):
                 next_line = lines[i + 1].strip()
                 
                 # Try to extract PU and Description
-                # The pattern is: product code (digits only or digits with letters), then description
-                # Examples: 
-                # "601035,ML_Duct Single Mode FOC,72 Fibers" -> PU: 601035, Desc: ML_Duct Single Mode FOC,72 Fibers
-                # "112010-Hard Earth, 5/8"x6ft rod (OSP)_ML" -> PU: 112010, Desc: Hard Earth, 5/8"x6ft rod (OSP)_ML
-                # "111010-Head Guy, 6 M(OSP)_ML" -> PU: 111010, Desc: Head Guy, 6 M(OSP)_ML
-                
-                # First try: look for pattern where PU is digits only, followed by optional hyphen or comma
                 pu_match = re.search(r'^(\d+)[,\-]?\s*(.+)$', next_line)
                 if pu_match:
                     pu = pu_match.group(1).strip()
                     description = pu_match.group(2).strip()
                 else:
-                    # Second try: look for alphanumeric with hyphen (like 900020-Cable)
                     pu_match2 = re.search(r'^([A-Z0-9\-_]+)[,\s]+(.+)$', next_line)
                     if pu_match2:
                         pu = pu_match2.group(1).strip()
                         description = pu_match2.group(2).strip()
                     else:
-                        # Third try: just get the first word as PU if it looks like a product code
                         pu_match3 = re.search(r'^([A-Z0-9\-_]+)', next_line)
                         if pu_match3:
                             potential_pu = pu_match3.group(1).strip()
-                            # Check if it's a valid product code (digits or digits with letters)
                             if re.match(r'^\d+$', potential_pu) or re.match(r'^\d+[A-Z\-_]', potential_pu):
                                 pu = potential_pu
                                 description = next_line.replace(pu, '').strip()
@@ -175,7 +168,7 @@ def parse_alternative(text):
                 'Subtotal': ''
             }
             
-            # Extract QTY - look for pattern like "3 (EA)" or "100 (M)" or "2,000 (M)"
+            # Extract QTY
             qty_match = re.search(r'([\d,]+(?:\.\d+)?\s*\([A-Z]+\))', line)
             if qty_match:
                 current_row['QTY'] = qty_match.group(1).strip()
@@ -192,8 +185,6 @@ def parse_alternative(text):
             if i + 1 < len(lines):
                 next_line = lines[i + 1].strip()
                 if next_line and not next_line.startswith('STATUS') and 'Tax' not in next_line and 'Unconfirmed' not in next_line:
-                    # Try to extract PU (digits only first, then digits with letters)
-                    # Pattern: digits only (like 601035) or digits with letters after (like 112010-Hard)
                     pu_match = re.search(r'^(\d+)[,\-]?\s*(.+)$', next_line)
                     if pu_match:
                         pu = pu_match.group(1).strip()
@@ -205,7 +196,6 @@ def parse_alternative(text):
                             description = description[1:].strip()
                         current_row['Description'] = description
                     else:
-                        # Try alphanumeric pattern
                         pu_match2 = re.search(r'^([A-Z0-9\-_]+)[,\s]+(.+)$', next_line)
                         if pu_match2:
                             pu = pu_match2.group(1).strip()
@@ -213,7 +203,6 @@ def parse_alternative(text):
                             description = pu_match2.group(2).strip()
                             current_row['Description'] = description
                         else:
-                            # Just take the whole line as description
                             current_row['Description'] = next_line
                     i += 1
         
@@ -225,15 +214,98 @@ def parse_alternative(text):
     
     return parsed_rows
 
-def create_download_link(df, filename="extracted_data.xlsx"):
-    """Create download link for Excel file"""
+def create_excel_with_style(df, filename):
+    """
+    Create Excel file with professional styling and formatting
+    """
     output = BytesIO()
+    
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Extracted Data')
-    excel_data = output.getvalue()
+        
+        # Get the workbook and worksheet
+        workbook = writer.book
+        worksheet = writer.sheets['Extracted Data']
+        
+        # Define styles
+        header_font = Font(name='Calibri', size=12, bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+        header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        
+        cell_font = Font(name='Calibri', size=11)
+        cell_alignment = Alignment(horizontal='left', vertical='center')
+        number_alignment = Alignment(horizontal='right', vertical='center')
+        
+        # Define borders
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Apply header styles
+        for col in range(1, len(df.columns) + 1):
+            cell = worksheet.cell(row=1, column=col)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = thin_border
+        
+        # Apply data styles
+        for row in range(2, len(df) + 2):
+            for col in range(1, len(df.columns) + 1):
+                cell = worksheet.cell(row=row, column=col)
+                cell.font = cell_font
+                cell.border = thin_border
+                
+                # Apply right alignment for number columns
+                if col in [5, 6]:  # Unit Price and Subtotal columns
+                    cell.alignment = number_alignment
+                    # Format as number with 2 decimal places
+                    if cell.value and isinstance(cell.value, (int, float)):
+                        cell.number_format = '#,##0.00'
+                else:
+                    cell.alignment = cell_alignment
+        
+        # Set column widths
+        column_widths = {
+            'A': 12,  # Line #
+            'B': 15,  # PU
+            'C': 50,  # Description
+            'D': 15,  # QTY
+            'E': 18,  # Unit Price
+            'F': 18   # Subtotal
+        }
+        
+        for col, width in column_widths.items():
+            worksheet.column_dimensions[col].width = width
+        
+        # Freeze the header row
+        worksheet.freeze_panes = 'A2'
+        
+        # Add a title row above the data (optional)
+        # Uncomment if you want a title
+        # worksheet.insert_rows(1)
+        # title_cell = worksheet.cell(row=1, column=1)
+        # title_cell.value = f"Extracted Data from {filename}"
+        # title_cell.font = Font(name='Calibri', size=14, bold=True)
+        # worksheet.merge_cells(f'A1:F1')
+    
+    return output.getvalue()
+
+def create_download_link(df, filename):
+    """
+    Create download link for Excel file with filename matching uploaded file
+    """
+    # Remove .pdf extension and add .xlsx
+    base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    excel_filename = f"{base_name}_extracted.xlsx"
+    
+    excel_data = create_excel_with_style(df, base_name)
     
     b64 = base64.b64encode(excel_data).decode()
-    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}">📥 Download Excel File</a>'
+    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{excel_filename}">📥 Download Excel File</a>'
     return href
 
 # Main app UI
@@ -289,16 +361,23 @@ def main():
             # Download options
             st.subheader("📥 Download Extracted Data")
             
+            # Get original filename
+            original_filename = uploaded_file.name
+            
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown(create_download_link(df), unsafe_allow_html=True)
+                # Excel download with styling and matching filename
+                st.markdown(create_download_link(df, original_filename), unsafe_allow_html=True)
             
             with col2:
+                # CSV download with matching filename
+                base_name = original_filename.rsplit('.', 1)[0] if '.' in original_filename else original_filename
+                csv_filename = f"{base_name}_extracted.csv"
                 csv = df.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Download CSV File",
                     data=csv,
-                    file_name="extracted_data.csv",
+                    file_name=csv_filename,
                     mime="text/csv"
                 )
             
