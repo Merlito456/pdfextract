@@ -119,7 +119,6 @@ def parse_text_data(text):
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
     # Pattern for the specific format in your sample
-    # Looking for: Line number, then Not Available, then QTY, then date, then prices
     pattern1 = r'(\d+)\s+Not\s+Available\s+(\d+\([A-Z]+\))\s+[\d]+\s+[A-Za-z]+\s+[\d]+\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+'
     
     # Pattern for format with product code
@@ -391,27 +390,11 @@ def main():
                         text = ""
                         for page in pdf.pages:
                             text += page.extract_text() or ""
-                        st.text(text[:2000])  # Show first 2000 characters
+                        st.text(text[:2000])
                 except Exception as e:
                     st.error(f"Could not display PDF text: {str(e)}")
     else:
         st.info("👈 Please upload a PDF file to extract data")
-        
-        # Show instructions
-        with st.expander("📖 Instructions"):
-            st.markdown("""
-            ### How to use this app:
-            1. Upload a PDF file containing line items or product data
-            2. The app will automatically extract:
-               - Line Number
-               - Product Unit (PU)
-               - Description
-               - Quantity (QTY)
-               - Unit Price
-               - Subtotal
-            3. View the extracted data in a table
-            4. Download the data as Excel or CSV
-            
-           
+
 if __name__ == "__main__":
-main()
+    main()
