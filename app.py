@@ -16,7 +16,7 @@ st.markdown("Extract line item data from PDF files")
 
 def extract_data_from_pdf(pdf_file):
     """
-    Extract data from PDF file focusing on line items
+    Extract data from PDF file
     """
     extracted_data = []
     
@@ -28,59 +28,16 @@ def extract_data_from_pdf(pdf_file):
                 if text:
                     all_text += text + "\n"
             
-            # Try table extraction first
-            for page in pdf.pages:
-                tables = page.extract_tables()
-                if tables:
-                    for table in tables:
-                        for row in table:
-                            if row and any(cell for cell in row if cell):
-                                extracted_data.append(row)
-            
-            # If tables found, parse them
-            if extracted_data:
-                parsed = parse_table_data(extracted_data)
-                if parsed:
-                    return parsed
-            
-            # Fallback to text parsing
-            return parse_text_data(all_text)
+            # Parse the text
+            return parse_pdf_text(all_text)
             
     except Exception as e:
         st.error(f"Error extracting data: {str(e)}")
         return []
 
-def parse_table_data(table_data):
+def parse_pdf_text(text):
     """
-    Parse table data into structured format, filtering out headers and tax rows
-    """
-    parsed_rows = []
-    
-    for row in table_data:
-        if not row:
-            continue
-            
-        # Skip rows that are headers or tax information
-        row_str = " ".join([str(cell).lower() if cell else "" for cell in row])
-        
-        # Skip rows containing header or tax keywords
-        skip_keywords = ['line # no', 'schedule lines', 'part # / description', 
-                        'tax category', 'tax rate', 'taxable amount', 'tax amount',
-                        'tax location', 'exempt detail', 'return qty', 'need by']
-        
-        if any(keyword in row_str for keyword in skip_keywords):
-            continue
-        
-        # Try to parse as a data row
-        parsed_row = parse_row_data(row)
-        if parsed_row and (parsed_row.get('PU') or parsed_row.get('Description')):
-            parsed_rows.append(parsed_row)
-    
-    return parsed_rows
-
-def parse_text_data(text):
-    """
-    Parse text data using regex patterns, filtering out headers and tax rows
+    Parse the PDF text to extract line item data
     """
     parsed_rows = []
     
@@ -88,265 +45,163 @@ def parse_text_data(text):
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
-    # Skip header lines
-    skip_keywords = ['line # no', 'schedule lines', 'part # / description', 
-                    'tax category', 'tax rate', 'taxable amount', 'tax amount',
-                    'tax location', 'exempt detail', 'return qty', 'need by']
-    
-    # Pattern for the specific format in your sample
-    # Looking for: Line number, then Not Available or product code, then QTY, then date, then prices
-    pattern1 = r'(\d+)\s+(?:Not\s+Available|([A-Z0-9\-_]+))\s+(\d+\([A-Z]+\))\s+[\d]+\s+[A-Za-z]+\s+[\d]+\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+(?:\s+([\d,]+\.\d+)\s+[A-Z]+)?'
-    
-    # Pattern for format with product code
-    pattern2 = r'(\d+)\s+([A-Z0-9\-_]+)\s+([A-Za-z0-9\s\._\-]+?)\s+(\d+\([A-Z]+\))\s+[\d]+\s+[A-Za-z]+\s+[\d]+\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+'
-    
-    # Pattern for general format
-    pattern3 = r'(\d+)\s+([A-Z0-9\-_]+)\s+([^\n]+?)\s+(\d+\([A-Z]+\))\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+'
-    
-    # Pattern for simple format with just prices
-    pattern4 = r'(\d+)\s+([A-Z0-9\-_]+)\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+'
-    
     i = 0
     while i < len(lines):
         line = lines[i]
         
-        # Skip header and tax lines
-        if any(keyword in line.lower() for keyword in skip_keywords):
+        # Look for line items - they start with "Line #No. Schedule Lines"
+        if 'Line #No. Schedule Lines' in line or 'Line #No. Schedule LinesPart # / Description' in line.replace(' ', ''):
+            # This is a header, skip to next line
             i += 1
             continue
         
-        # Try each pattern
-        matched = False
-        for pattern in [pattern1, pattern2, pattern3, pattern4]:
-            match = re.search(pattern, line, re.IGNORECASE)
-            if match:
-                groups = match.groups()
-                
-                # Extract data based on pattern
-                row_data = {'Line #': "", 'PU': "", 'Description': "", 'QTY': "", 'Unit Price': "", 'Subtotal': ""}
-                
-                if len(groups) >= 4:
-                    row_data['Line #'] = groups[0].strip() if groups[0] else ""
-                    
-                    # Find PU (could be in different positions)
-                    pu_found = False
-                    for g in groups[1:]:
-                        if g and re.search(r'[A-Z0-9\-_]{4,}', g) and not pu_found:
-                            row_data['PU'] = g.strip()
-                            pu_found = True
-                            break
-                    
-                    # Find QTY
-                    for g in groups:
-                        if g and re.search(r'\d+\([A-Z]+\)', g):
-                            row_data['QTY'] = g.strip()
-                            break
-                    
-                    # Find prices (last two numbers with commas and decimals)
-                    price_matches = re.findall(r'([\d,]+\.\d+)', line)
-                    if len(price_matches) >= 2:
-                        row_data['Unit Price'] = price_matches[-2]
-                        row_data['Subtotal'] = price_matches[-1]
-                    elif len(price_matches) == 1:
-                        row_data['Subtotal'] = price_matches[0]
-                    
-                    # If description not found, try to extract from line
-                    if not row_data['Description']:
-                        # Remove known fields from line
-                        desc_line = line
-                        for field in [row_data['Line #'], row_data['PU'], row_data['QTY'], row_data['Unit Price'], row_data['Subtotal']]:
-                            if field:
-                                desc_line = desc_line.replace(field, '')
-                        desc_line = re.sub(r'\s+', ' ', desc_line).strip()
-                        desc_line = re.sub(r'PHP|₱|Not Available', '', desc_line).strip()
-                        if desc_line and len(desc_line) > 5:
-                            row_data['Description'] = desc_line
-                        elif i + 1 < len(lines):
-                            # Check next line for description
-                            next_line = lines[i + 1].strip()
-                            if re.search(r'[A-Za-z]', next_line) and not re.search(r'[\d,]', next_line):
-                                row_data['Description'] = next_line
-                                i += 1
-                    
-                    # Clean up description
-                    if row_data['Description']:
-                        row_data['Description'] = re.sub(r'Not Available', '', row_data['Description']).strip()
-                        row_data['Description'] = re.sub(r'\s+', ' ', row_data['Description']).strip()
-                    
-                    if row_data['Line #'] or row_data['PU']:
-                        parsed_rows.append(row_data)
-                        matched = True
-                        break
+        # Look for data rows starting with line number
+        # Pattern: Line number, then "Not Available", then QTY, then date, then prices
+        match = re.search(r'^(\d+)\s+(Not\s+Available|Material)\s+(\d+[\(\)\s\w]+?)\s+(\d+\s+[A-Za-z]+\s+\d+)\s+([\d,]+\.\d+)\s+[A-Z]+\s+([\d,]+\.\d+)\s+[A-Z]+(?:\s+([\d,]+\.\d+)\s+[A-Z]+)?', line, re.IGNORECASE)
         
-        i += 1
-    
-    # If no data found, try a simpler approach
-    if not parsed_rows:
-        parsed_rows = parse_line_by_line(lines)
-    
-    return parsed_rows
-
-def parse_line_by_line(lines):
-    """
-    Parse data line by line using simpler heuristics, filtering out headers and tax rows
-    """
-    parsed_rows = []
-    
-    skip_keywords = ['line # no', 'schedule lines', 'part # / description', 
-                    'tax category', 'tax rate', 'taxable amount', 'tax amount',
-                    'tax location', 'exempt detail', 'return qty', 'need by']
-    
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        
-        # Skip header and tax lines
-        if any(keyword in line.lower() for keyword in skip_keywords):
-            i += 1
-            continue
-        
-        # Look for line that might contain product data
-        if re.search(r'\d+', line) and (re.search(r'[A-Z0-9\-_]{4,}', line) or re.search(r'PHP|₱', line)):
-            parts = line.split()
+        if match:
+            groups = match.groups()
             
-            # Try to extract fields
-            line_num = ""
+            # Extract line number
+            line_num = groups[0].strip()
+            
+            # Extract QTY
+            qty = groups[2].strip() if len(groups) > 2 else ""
+            
+            # Extract Unit Price and Subtotal
+            unit_price = groups[4].strip() if len(groups) > 4 else ""
+            subtotal = groups[5].strip() if len(groups) > 5 else ""
+            
+            # Look for product code and description
             pu = ""
-            qty = ""
-            unit_price = ""
-            subtotal = ""
-            description_parts = []
+            description = ""
             
-            # Look for line number (first number)
-            for part in parts:
-                if part.isdigit() and not line_num:
-                    line_num = part
-                    break
-            
-            # Look for product code (alphanumeric with special chars)
-            for part in parts:
-                if re.search(r'[A-Z0-9\-_]{4,}', part) and not pu:
-                    pu = part
-                    break
-            
-            # Look for QTY (number with parentheses)
-            for part in parts:
-                if re.search(r'\d+\([A-Z]+\)', part) and not qty:
-                    qty = part
-                    break
-            
-            # Look for prices
-            price_matches = re.findall(r'([\d,]+\.\d+)', line)
-            if len(price_matches) >= 2:
-                unit_price = price_matches[-2] if len(price_matches) >= 2 else ""
-                subtotal = price_matches[-1] if price_matches else ""
-            elif len(price_matches) == 1:
-                subtotal = price_matches[0]
-            
-            # Everything else might be description
-            for part in parts:
-                if (part not in [line_num, pu, qty, unit_price, subtotal] and 
-                    not re.search(r'PHP|₱|Not|Available', part)):
-                    description_parts.append(part)
-            
-            description = " ".join(description_parts)
-            
-            # If description is empty, check next line
-            if not description and i + 1 < len(lines):
+            # Check next line for product code and description
+            if i + 1 < len(lines):
                 next_line = lines[i + 1].strip()
-                if re.search(r'[A-Za-z]', next_line) and not re.search(r'[\d,]', next_line):
-                    description = next_line
-                    i += 1
+                
+                # Look for product code pattern (like 900020-Cable Entrance Facilities_OSP Lab)
+                pu_match = re.search(r'^([A-Z0-9\-_]+)[,\s]+([A-Za-z0-9\s\._\-]+)', next_line)
+                if pu_match:
+                    pu = pu_match.group(1).strip()
+                    description = pu_match.group(2).strip()
+                else:
+                    # Try alternative pattern
+                    pu_match2 = re.search(r'^([A-Z0-9\-_]+)', next_line)
+                    if pu_match2:
+                        pu = pu_match2.group(1).strip()
+                        # Rest is description
+                        description = next_line.replace(pu, '').strip()
+                        if description.startswith(','):
+                            description = description[1:].strip()
+                    else:
+                        # If no product code found, the whole line might be description
+                        if not re.search(r'[\d,]', next_line):
+                            description = next_line
             
-            # Clean description
+            # If we still don't have PU, try to extract from the line
+            if not pu:
+                pu_match_in_line = re.search(r'([A-Z0-9\-_]{6,})', line)
+                if pu_match_in_line:
+                    pu = pu_match_in_line.group(1)
+            
+            # Clean up description
             if description:
-                description = re.sub(r'Not Available', '', description).strip()
+                description = re.sub(r'^[,:\s]+', '', description)
                 description = re.sub(r'\s+', ' ', description).strip()
             
-            if line_num or pu:
+            # Add the row
+            if line_num:
                 parsed_rows.append({
                     'Line #': line_num,
                     'PU': pu,
                     'Description': description,
-                    'QTY': qty if qty else "1(EA)",
+                    'QTY': qty,
                     'Unit Price': unit_price,
                     'Subtotal': subtotal
                 })
+                
+                # Skip the description line if we used it
+                if pu or description:
+                    i += 1
         
         i += 1
     
+    # If no data found with the main pattern, try alternative parsing
+    if not parsed_rows:
+        parsed_rows = parse_alternative(text)
+    
     return parsed_rows
 
-def parse_row_data(row):
+def parse_alternative(text):
     """
-    Parse a single row of data, filtering out headers and tax rows
+    Alternative parsing method for the data
     """
-    # Clean the row
-    clean_row = [str(cell).strip() if cell else "" for cell in row]
-    clean_row = [cell for cell in clean_row if cell]
+    parsed_rows = []
     
-    if len(clean_row) < 3:
-        return {}
+    # Split by line items
+    lines = text.split('\n')
     
-    # Skip if this looks like a header or tax row
-    row_str = " ".join(clean_row).lower()
-    skip_keywords = ['line # no', 'schedule lines', 'part # / description', 
-                    'tax category', 'tax rate', 'taxable amount', 'tax amount',
-                    'tax location', 'exempt detail', 'return qty', 'need by']
+    current_row = {}
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Look for line number
+        line_num_match = re.search(r'^(\d+)\s+(Not\s+Available|Material)', line)
+        if line_num_match:
+            # If we have a previous row, save it
+            if current_row:
+                parsed_rows.append(current_row)
+            
+            # Start new row
+            current_row = {
+                'Line #': line_num_match.group(1),
+                'PU': '',
+                'Description': '',
+                'QTY': '',
+                'Unit Price': '',
+                'Subtotal': ''
+            }
+            
+            # Extract QTY
+            qty_match = re.search(r'(\d+[\(\)\s\w]+?)\s+\d+\s+[A-Za-z]+', line)
+            if qty_match:
+                current_row['QTY'] = qty_match.group(1).strip()
+            
+            # Extract prices
+            price_matches = re.findall(r'([\d,]+\.\d+)\s+PHP', line)
+            if len(price_matches) >= 2:
+                current_row['Unit Price'] = price_matches[0]
+                current_row['Subtotal'] = price_matches[1]
+            elif len(price_matches) == 1:
+                current_row['Subtotal'] = price_matches[0]
+            
+            # Check next line for PU and Description
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if next_line and not next_line.startswith('STATUS') and not 'Tax' in next_line:
+                    # Try to extract PU
+                    pu_match = re.search(r'^([A-Z0-9\-_]+)', next_line)
+                    if pu_match:
+                        pu = pu_match.group(1)
+                        current_row['PU'] = pu
+                        # Rest is description
+                        desc = next_line.replace(pu, '').strip()
+                        if desc.startswith(','):
+                            desc = desc[1:].strip()
+                        current_row['Description'] = desc
+                    else:
+                        current_row['Description'] = next_line
+                    i += 1
+        
+        i += 1
     
-    if any(keyword in row_str for keyword in skip_keywords):
-        return {}
+    # Add the last row
+    if current_row:
+        parsed_rows.append(current_row)
     
-    parsed = {
-        'Line #': "",
-        'PU': "",
-        'Description': "",
-        'QTY': "",
-        'Unit Price': "",
-        'Subtotal': ""
-    }
-    
-    # Find line number
-    for cell in clean_row:
-        if cell.isdigit() and len(cell) <= 4:
-            parsed['Line #'] = cell
-            break
-    
-    # Find PU code
-    for cell in clean_row:
-        if re.search(r'[A-Z0-9\-_]{4,}', cell) and not parsed['PU']:
-            parsed['PU'] = cell
-            break
-    
-    # Find QTY
-    for cell in clean_row:
-        if re.search(r'\d+\([A-Z]+\)', cell) and not parsed['QTY']:
-            parsed['QTY'] = cell
-            break
-    
-    # Find prices
-    prices = []
-    for cell in clean_row:
-        if re.search(r'[\d,]+\.\d+', cell):
-            prices.append(cell)
-    
-    if len(prices) >= 2:
-        parsed['Unit Price'] = prices[-2]
-        parsed['Subtotal'] = prices[-1]
-    elif len(prices) == 1:
-        parsed['Subtotal'] = prices[0]
-    
-    # Find description (remaining cells)
-    excluded = [parsed['Line #'], parsed['PU'], parsed['QTY'], parsed['Unit Price'], parsed['Subtotal']]
-    remaining = [cell for cell in clean_row if cell not in excluded and not re.search(r'PHP|₱|Not|Available', cell)]
-    
-    if remaining:
-        parsed['Description'] = " ".join(remaining)
-        # Clean description
-        parsed['Description'] = re.sub(r'Not Available', '', parsed['Description']).strip()
-        parsed['Description'] = re.sub(r'\s+', ' ', parsed['Description']).strip()
-    
-    return parsed
+    return parsed_rows
 
 def create_download_link(df, filename="extracted_data.xlsx"):
     """Create download link for Excel file"""
@@ -377,11 +232,10 @@ def main():
             df = df.replace('', pd.NA).dropna(how='all')
             df = df.fillna('')
             
-            # Remove duplicate headers if any
-            df = df[~df['Line #'].astype(str).str.contains('Line #', case=False, na=False)]
-            df = df[~df['PU'].astype(str).str.contains('Tax', case=False, na=False)]
+            # Remove any rows with headers
+            df = df[~df['Line #'].astype(str).str.contains('Line', case=False, na=False)]
             
-            # Reorder columns if they exist
+            # Reorder columns
             desired_columns = ['Line #', 'PU', 'Description', 'QTY', 'Unit Price', 'Subtotal']
             existing_columns = [col for col in desired_columns if col in df.columns]
             if existing_columns:
@@ -397,7 +251,6 @@ def main():
                 st.metric("Total Items", len(df))
             with col2:
                 if 'Subtotal' in df.columns and not df['Subtotal'].empty:
-                    # Clean subtotal column for calculation
                     subtotal_clean = df['Subtotal'].astype(str).str.replace(',', '').str.replace(' PHP', '').str.replace('₱', '').str.replace(' ', '')
                     subtotal_clean = subtotal_clean.replace('', '0')
                     try:
@@ -416,11 +269,9 @@ def main():
             
             col1, col2 = st.columns(2)
             with col1:
-                # Excel download
                 st.markdown(create_download_link(df), unsafe_allow_html=True)
             
             with col2:
-                # CSV download
                 csv = df.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Download CSV File",
@@ -434,7 +285,7 @@ def main():
                 st.json(extracted_data)
                 
         else:
-            st.warning("No data could be extracted from the PDF. Please check if the PDF contains tabular data.")
+            st.warning("No data could be extracted from the PDF.")
             
             # Show raw text for debugging
             with st.expander("📄 Show raw PDF text"):
@@ -443,7 +294,7 @@ def main():
                         text = ""
                         for page in pdf.pages:
                             text += page.extract_text() or ""
-                        st.text(text[:2000])
+                        st.text(text[:3000])
                 except Exception as e:
                     st.error(f"Could not display PDF text: {str(e)}")
     else:
