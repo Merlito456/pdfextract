@@ -17,6 +17,84 @@ st.set_page_config(
 st.title("📄 PDF Data Extractor")
 st.markdown("Extract line item data from PDF files - Support multiple uploads")
 
+# Custom CSS for better table preview
+st.markdown("""
+<style>
+    .preview-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 9999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    .preview-content {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        max-width: 90%;
+        max-height: 90%;
+        overflow: auto;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .preview-content table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Calibri', sans-serif;
+    }
+    .preview-content th {
+        background-color: #1F4E79;
+        color: white;
+        padding: 10px;
+        text-align: center;
+        border: 1px solid #ddd;
+        font-weight: bold;
+    }
+    .preview-content td {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        text-align: left;
+    }
+    .preview-content tr:nth-child(even) {
+        background-color: #f9f9f9;
+    }
+    .preview-content tr:hover {
+        background-color: #f5f5f5;
+    }
+    .close-btn {
+        float: right;
+        background: #ff4444;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        margin-bottom: 10px;
+    }
+    .close-btn:hover {
+        background: #cc0000;
+    }
+    .preview-btn {
+        background-color: #4CAF50;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        margin: 5px;
+    }
+    .preview-btn:hover {
+        background-color: #45a049;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 def extract_data_from_pdf(pdf_file):
     """
     Extract data from PDF file
@@ -355,6 +433,39 @@ def create_combined_excel(all_dfs, filenames):
     
     return output.getvalue()
 
+def show_table_preview(df, title="Data Preview"):
+    """
+    Display a styled table preview in a modal-like format
+    """
+    # Convert DataFrame to HTML with styling
+    styled_df = df.style.set_table_styles([
+        {'selector': 'thead th', 'props': [('background-color', '#1F4E79'), ('color', 'white'), ('font-weight', 'bold'), ('padding', '10px'), ('text-align', 'center')]},
+        {'selector': 'tbody td', 'props': [('padding', '8px 12px'), ('border', '1px solid #ddd')]},
+        {'selector': 'tbody tr:nth-child(even)', 'props': [('background-color', '#f9f9f9')]},
+        {'selector': 'tbody tr:hover', 'props': [('background-color', '#f5f5f5')]},
+    ]).set_properties(**{
+        'font-family': 'Calibri, sans-serif',
+        'font-size': '11pt'
+    }).format({
+        'Unit Price': '{:,.2f}',
+        'Subtotal': '{:,.2f}'
+    }, na_rep='')
+    
+    html_table = styled_df.to_html()
+    
+    # Display in an expander as a modal-like view
+    with st.expander(f"📊 {title}", expanded=True):
+        st.markdown(f"""
+        <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <div style="max-height: 600px; overflow: auto;">
+                {html_table}
+            </div>
+            <div style="margin-top: 10px; color: #666; font-size: 12px;">
+                Total items: {len(df)} | Columns: {', '.join(df.columns)}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
 def process_multiple_pdfs(uploaded_files, process_mode):
     """
     Process multiple PDFs based on selected mode
@@ -381,11 +492,13 @@ def process_multiple_pdfs(uploaded_files, process_mode):
             if existing_columns:
                 df = df[existing_columns]
             
-            if process_mode == "Combine into one":
-                all_data.append(df)
-            else:  # Process individually
-                all_data.append(df)
+            # Convert price columns to numeric for proper display
+            for col in ['Unit Price', 'Subtotal']:
+                if col in df.columns:
+                    df[col] = df[col].astype(str).str.replace(',', '').str.replace(' PHP', '').str.replace('₱', '').str.replace(' ', '')
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
             
+            all_data.append(df)
             file_names.append(file.name)
             total_rows += len(df)
         
@@ -452,6 +565,13 @@ def main():
                             source_col.extend([filename] * len(df))
                         combined_df.insert(0, 'Source File', source_col)
                     
+                    # Show preview button
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        if st.button("👁️ Preview Table", key="preview_combined"):
+                            show_table_preview(combined_df, "Combined Data Preview")
+                    
+                    # Display the dataframe
                     st.dataframe(combined_df, use_container_width=True)
                     
                     # Display statistics
@@ -460,15 +580,10 @@ def main():
                         st.metric("Total Items", len(combined_df))
                     with col2:
                         if 'Subtotal' in combined_df.columns and not combined_df['Subtotal'].empty:
-                            subtotal_clean = combined_df['Subtotal'].astype(str).str.replace(',', '').str.replace(' PHP', '').str.replace('₱', '').str.replace(' ', '')
-                            subtotal_clean = subtotal_clean.replace('', '0')
-                            try:
-                                subtotal_sum = pd.to_numeric(subtotal_clean, errors='coerce').sum()
-                                if not pd.isna(subtotal_sum):
-                                    st.metric("Total Value", f"₱{subtotal_sum:,.2f}")
-                                else:
-                                    st.metric("Total Value", "N/A")
-                            except:
+                            subtotal_sum = combined_df['Subtotal'].sum()
+                            if not pd.isna(subtotal_sum):
+                                st.metric("Total Value", f"₱{subtotal_sum:,.2f}")
+                            else:
                                 st.metric("Total Value", "N/A")
                     with col3:
                         st.metric("Files Processed", len(uploaded_files))
@@ -496,12 +611,32 @@ def main():
                         )
                     
                 else:  # Process individually
-                    # Show each file's data
+                    # Show each file's data with preview buttons
                     for idx, (df, filename) in enumerate(zip(all_data, file_names)):
-                        with st.expander(f"📄 {filename} ({len(df)} items)"):
+                        with st.expander(f"📄 {filename} ({len(df)} items)", expanded=False):
+                            # Preview button for individual file
+                            col1, col2 = st.columns([1, 4])
+                            with col1:
+                                if st.button(f"👁️ Preview", key=f"preview_{idx}"):
+                                    show_table_preview(df, f"Preview: {filename}")
+                            
                             st.dataframe(df, use_container_width=True)
+                            
+                            # Show mini stats for this file
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Items", len(df))
+                            with col2:
+                                if 'Subtotal' in df.columns:
+                                    subtotal_sum = df['Subtotal'].sum()
+                                    if not pd.isna(subtotal_sum):
+                                        st.metric("Total Value", f"₱{subtotal_sum:,.2f}")
+                                    else:
+                                        st.metric("Total Value", "N/A")
+                            with col3:
+                                st.metric("Fields", len(df.columns))
                     
-                    # Download individual files or combined
+                    # Download options
                     st.subheader("📥 Download Extracted Data")
                     
                     download_option = st.radio(
@@ -544,6 +679,12 @@ def main():
                             for df, filename in zip(all_data, file_names):
                                 source_col.extend([filename] * len(df))
                             combined_df.insert(0, 'Source File', source_col)
+                        
+                        # Preview for combined data
+                        col1, col2 = st.columns([1, 4])
+                        with col1:
+                            if st.button("👁️ Preview Combined Data", key="preview_combined_individual"):
+                                show_table_preview(combined_df, "Combined Data Preview")
                         
                         csv = combined_df.to_csv(index=False).encode('utf-8')
                         st.download_button(
