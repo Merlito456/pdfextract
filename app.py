@@ -6,24 +6,24 @@ import io
 st.set_page_config(page_title="PO Data Extractor", layout="wide")
 
 st.title("📄 PO Data Extractor")
-st.write("Upload your Purchase Order PDF to convert it into a structured Excel file.")
-
 uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 
 if uploaded_file is not None:
     all_items = []
     
     with pdfplumber.open(uploaded_file) as pdf:
-        # Loop through pages
         for page in pdf.pages:
-            # Extract tables - 'lattice' works best for structured POs
-            table = page.extract_table(table_settings={"strategy": "lines"})
+            # Simplified table extraction to avoid the TypeError
+            # We use the default settings first
+            table = page.extract_table()
             
             if table:
                 for row in table:
-                    # Filter for rows that contain data (Line # as the identifier)
-                    # Adjust 'row[0]' index if your specific PDF has different column spacing
-                    if row[0] and str(row[0]).strip().isdigit():
+                    # Clean the row to ensure we aren't processing empty lists
+                    row = [str(cell) if cell is not None else "" for cell in row]
+                    
+                    # Logic: Look for rows starting with a digit (Line #)
+                    if row[0].strip().isdigit():
                         all_items.append({
                             "Line #": row[0],
                             "PU": row[1] if len(row) > 1 else "",
@@ -35,27 +35,13 @@ if uploaded_file is not None:
 
     if all_items:
         df = pd.DataFrame(all_items)
-        
-        # Data Cleaning: remove 'PHP' and commas for clean numeric export
-        for col in ["Unit Price", "Subtotal"]:
-            df[col] = df[col].replace(r'[^0-9.]', '', regex=True)
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        st.success(f"Successfully extracted {len(df)} items!")
         st.dataframe(df)
 
-        # Create Excel file in memory
+        # Generate Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='PO Data')
+            df.to_excel(writer, index=False)
         
-        st.download_button(
-            label="⬇️ Download Excel File",
-            data=output.getvalue(),
-            file_name="extracted_po_data.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("⬇️ Download Excel", output.getvalue(), "extracted.xlsx")
     else:
-        st.error("Could not find tabular data in this PDF. Please verify the file format.")
-
-# Conceptual diagram showing how the data pipeline works:
+        st.error("No table detected. Please check if the PDF is text-based or scanned.")
