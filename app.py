@@ -9,17 +9,27 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 st.set_page_config(
-    page_title="PDF Data Extractor",
+    page_title="PO Details Data Extractor",
     page_icon="📄",
     layout="wide"
 )
 
-st.title("📄 PDF Data Extractor")
-st.markdown("Extract line item data from PDF files - Support multiple uploads")
-
-# Custom CSS for better table preview
+# Custom CSS for better styling
 st.markdown("""
 <style>
+    .main-title {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #1F4E79;
+        text-align: center;
+        margin-bottom: 0.5rem;
+    }
+    .sub-title {
+        font-size: 1.2rem;
+        color: #666;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
     .preview-modal {
         position: fixed;
         top: 0;
@@ -92,8 +102,16 @@ st.markdown("""
     .preview-btn:hover {
         background-color: #45a049;
     }
+    .stExpander {
+        border: 1px solid #e0e0e0;
+        border-radius: 5px;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# App title
+st.markdown('<div class="main-title">📄 PO Details Data Extractor</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Extract Purchase Order line items from PDF to Excel</div>', unsafe_allow_html=True)
 
 def extract_data_from_pdf(pdf_file):
     """
@@ -299,11 +317,11 @@ def create_excel_with_style(df, filename):
     output = BytesIO()
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Extracted Data')
+        df.to_excel(writer, index=False, sheet_name='PO Details')
         
         # Get the workbook and worksheet
         workbook = writer.book
-        worksheet = writer.sheets['Extracted Data']
+        worksheet = writer.sheets['PO Details']
         
         # Define styles
         header_font = Font(name='Calibri', size=12, bold=True, color='FFFFFF')
@@ -515,10 +533,10 @@ def main():
     
     # Allow multiple file uploads
     uploaded_files = st.file_uploader(
-        "Choose PDF files",
+        "Choose PDF files (Purchase Orders)",
         type=['pdf'],
         accept_multiple_files=True,
-        help="Upload one or multiple PDF files"
+        help="Upload one or multiple PO PDF files"
     )
     
     if uploaded_files:
@@ -537,22 +555,22 @@ def main():
             process_mode = st.radio(
                 "Processing Mode",
                 ["Combine into one", "Process individually"],
-                help="Combine all data into one file or keep separate"
+                help="Combine all PO data into one file or keep separate"
             )
         
         with col2:
             include_source = st.checkbox(
                 "Include source filename in data",
                 value=True,
-                help="Add a column showing which file each row came from"
+                help="Add a column showing which PO file each row came from"
             )
         
         # Process button
-        if st.button("🚀 Extract Data", type="primary"):
+        if st.button("🚀 Extract PO Data", type="primary"):
             all_data, file_names = process_multiple_pdfs(uploaded_files, process_mode)
             
             if all_data:
-                st.subheader("📊 Extracted Data")
+                st.subheader("📊 Extracted PO Details")
                 
                 if process_mode == "Combine into one":
                     # Combine all dataframes
@@ -569,7 +587,7 @@ def main():
                     col1, col2 = st.columns([1, 4])
                     with col1:
                         if st.button("👁️ Preview Table", key="preview_combined"):
-                            show_table_preview(combined_df, "Combined Data Preview")
+                            show_table_preview(combined_df, "Combined PO Data Preview")
                     
                     # Display the dataframe
                     st.dataframe(combined_df, use_container_width=True)
@@ -577,22 +595,22 @@ def main():
                     # Display statistics
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("Total Items", len(combined_df))
+                        st.metric("Total Line Items", len(combined_df))
                     with col2:
                         if 'Subtotal' in combined_df.columns and not combined_df['Subtotal'].empty:
                             subtotal_sum = combined_df['Subtotal'].sum()
                             if not pd.isna(subtotal_sum):
-                                st.metric("Total Value", f"₱{subtotal_sum:,.2f}")
+                                st.metric("Total PO Value", f"₱{subtotal_sum:,.2f}")
                             else:
-                                st.metric("Total Value", "N/A")
+                                st.metric("Total PO Value", "N/A")
                     with col3:
-                        st.metric("Files Processed", len(uploaded_files))
+                        st.metric("POs Processed", len(uploaded_files))
                     
                     # Download combined file
                     st.subheader("📥 Download Extracted Data")
                     
                     # Create combined filename
-                    base_name = "combined_extracted"
+                    base_name = "combined_po_details"
                     
                     col1, col2 = st.columns(2)
                     with col1:
@@ -625,14 +643,14 @@ def main():
                             # Show mini stats for this file
                             col1, col2, col3 = st.columns(3)
                             with col1:
-                                st.metric("Items", len(df))
+                                st.metric("Line Items", len(df))
                             with col2:
                                 if 'Subtotal' in df.columns:
                                     subtotal_sum = df['Subtotal'].sum()
                                     if not pd.isna(subtotal_sum):
-                                        st.metric("Total Value", f"₱{subtotal_sum:,.2f}")
+                                        st.metric("PO Value", f"₱{subtotal_sum:,.2f}")
                                     else:
-                                        st.metric("Total Value", "N/A")
+                                        st.metric("PO Value", "N/A")
                             with col3:
                                 st.metric("Fields", len(df.columns))
                     
@@ -653,7 +671,7 @@ def main():
                             with col1:
                                 excel_data = create_excel_with_style(df, base_name)
                                 b64 = base64.b64encode(excel_data).decode()
-                                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{base_name}_extracted.xlsx">📥 Download {base_name}.xlsx</a>'
+                                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{base_name}_PO_Details.xlsx">📥 Download {base_name}.xlsx</a>'
                                 st.markdown(href, unsafe_allow_html=True)
                             
                             with col2:
@@ -661,7 +679,7 @@ def main():
                                 st.download_button(
                                     label=f"📥 Download {base_name}.csv",
                                     data=csv,
-                                    file_name=f"{base_name}_extracted.csv",
+                                    file_name=f"{base_name}_PO_Details.csv",
                                     mime="text/csv",
                                     key=f"csv_{idx}"
                                 )
@@ -669,7 +687,7 @@ def main():
                         # Combine all into one file with multiple sheets
                         combined_excel = create_combined_excel(all_data, file_names)
                         b64 = base64.b64encode(combined_excel).decode()
-                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="combined_extracted.xlsx">📥 Download Combined Excel File (Multiple Sheets)</a>'
+                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="combined_po_details.xlsx">📥 Download Combined Excel File (Multiple Sheets)</a>'
                         st.markdown(href, unsafe_allow_html=True)
                         
                         # Also provide combined CSV
@@ -684,13 +702,13 @@ def main():
                         col1, col2 = st.columns([1, 4])
                         with col1:
                             if st.button("👁️ Preview Combined Data", key="preview_combined_individual"):
-                                show_table_preview(combined_df, "Combined Data Preview")
+                                show_table_preview(combined_df, "Combined PO Data Preview")
                         
                         csv = combined_df.to_csv(index=False).encode('utf-8')
                         st.download_button(
                             label="📥 Download Combined CSV File",
                             data=csv,
-                            file_name="combined_extracted.csv",
+                            file_name="combined_po_details.csv",
                             mime="text/csv"
                         )
                 
@@ -701,7 +719,45 @@ def main():
             else:
                 st.warning("No data could be extracted from any of the PDF files.")
     else:
-        st.info("👈 Please upload one or more PDF files to extract data")
+        st.info("👈 Please upload one or more PO PDF files to extract data")
+        
+        # Show instructions
+        with st.expander("ℹ️ How to use this app"):
+            st.markdown("""
+            ### PO Details Data Extractor - PDF to Excel
+            
+            This app extracts line item details from Purchase Order (PO) PDF files and converts them to Excel format.
+            
+            **What it extracts:**
+            - Line Number
+            - Product Unit (PU)
+            - Description
+            - Quantity (QTY)
+            - Unit Price
+            - Subtotal
+            
+            **Features:**
+            - 📤 Upload multiple PDF files at once
+            - 🔄 Combine all POs into one file or keep separate
+            - 👁️ Preview data before downloading
+            - 📥 Download as Excel or CSV
+            - 🎨 Professionally formatted Excel output
+            
+            **How to use:**
+            1. Upload one or more PO PDF files
+            2. Choose processing mode (Combine or Individual)
+            3. Click "Extract PO Data"
+            4. Preview the extracted data
+            5. Download as Excel or CSV
+            
+            **Supported PDF Format:**
+            The app is designed for PO PDFs that contain line items in a specific format with:
+            - Line numbers
+            - Product codes (PU)
+            - Descriptions
+            - Quantities in format like "3 (EA)"
+            - Unit prices and subtotals
+            """)
 
 if __name__ == "__main__":
     main()
